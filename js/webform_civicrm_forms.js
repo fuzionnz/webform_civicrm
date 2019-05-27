@@ -4,19 +4,18 @@
 
 var wfCivi = (function ($, D) {
   'use strict';
-  var setting = D.settings.webform_civicrm;
   /**
    * Public methods.
    */
   var pub = {};
 
-  pub.existingSelect = function (num, nid, path, toHide, cid, fetch) {
+  pub.existingSelect = function (num, nid, path, toHide, hideOrDisable, showEmpty, cid, fetch, defaults) {
     if (cid.charAt(0) === '-') {
-      resetFields(num, nid, true, 'show', toHide, 500);
+      resetFields(num, nid, true, 'show', toHide, hideOrDisable, showEmpty, 500, defaults);
       // Fill name fields with name typed
       if (cid.length > 1) {
         var names = {first: '', last: ''};
-        var s = cid.substr(1).split(' ');
+        var s = cid.substr(1).replace(/%/g, ' ').split(' ');
         for (var i in s) {
           var str = s[i].substr(0,1).toUpperCase() + s[i].substr(1).toLowerCase();
           if (i < 1) {
@@ -33,7 +32,7 @@ var wfCivi = (function ($, D) {
       }
       return;
     }
-    resetFields(num, nid, true, 'hide', toHide, 500);
+    resetFields(num, nid, true, 'hide', toHide, hideOrDisable, showEmpty, 500, defaults);
     if (cid && fetch) {
       $('.webform-client-form-'+nid).addClass('contact-loading');
       var params = getCids(nid);
@@ -41,28 +40,34 @@ var wfCivi = (function ($, D) {
       params.cid = cid;
       $.getJSON(path, params, function(data) {
         fillValues(data, nid);
+        resetFields(num, nid, false, 'hide', toHide, hideOrDisable, showEmpty);
         $('.webform-client-form-'+nid).removeClass('contact-loading');
       });
     }
   };
 
-  pub.existingInit = function (field, num, nid, path, toHide) {
-    var cid, ret = null;
-    if (field.length) {
-      if (field.is('select')) {
-        cid = $('option:selected', field).val();
-      }
-      else {
-        cid = field.attr('defaultValue');
+  pub.existingInit = function ($field, num, nid, path, toHide, tokenInputSettings) {
+    var cid = $field.val(),
+      prep = null,
+      hideOrDisable = $field.attr('data-hide-method'),
+      showEmpty = $field.attr('data-no-hide-blank') == '1';
+
+    function getCallbackPath() {
+      return path + (path.indexOf('?') < 0 ? '?' : '&') + $.param(getCids(nid));
+    }
+
+    if ($field.length) {
+      if ($field.is('[type=hidden]') && !cid) {
+        return;
       }
       if (!cid || cid.charAt(0) !== '-') {
-        resetFields(num, nid, false, 'hide', toHide);
+        resetFields(num, nid, false, 'hide', toHide, hideOrDisable, showEmpty);
       }
       if (cid) {
-        if (cid == field.attr('data-civicrm-id')) {
-          ret = [{id: cid, name: field.attr('data-civicrm-name')}];
+        if (cid == $field.attr('data-civicrm-id')) {
+          prep = [{id: cid, name: $field.attr('data-civicrm-name')}];
         }
-        else if (field.is(':text')) {
+        else if (tokenInputSettings) {
           // If for some reason the data is not embedded, fetch it from the server
           $.ajax({
             url: path,
@@ -71,14 +76,19 @@ var wfCivi = (function ($, D) {
             async: false,
             success: function(data) {
               if (data) {
-                ret = [{id: cid, name: data}];
+                prep = [{id: cid, name: data}];
               }
             }
           });
         }
       }
+      if (tokenInputSettings) {
+        tokenInputSettings.queryParam = 'str';
+        tokenInputSettings.tokenLimit = 1;
+        tokenInputSettings.prePopulate = prep;
+        $field.tokenInput(getCallbackPath, tokenInputSettings);
+      }
     }
-    return ret;
   };
 
   pub.initFileField = function(field, info) {
@@ -98,7 +108,7 @@ var wfCivi = (function ($, D) {
         $(':visible', container).hide();
         container.append('<input type="submit" class="form-submit ajax-processed civicrm-remove-file" value="' + Drupal.t('Change') + '" onclick="wfCivi.clearFileField(\'' + field + '\'); return false;">');
       }
-      container.prepend('<span class="civicrm-file-icon"><img alt="' + Drupal.t('File') + '" src="' + info.icon + '" /> ' + (info.name || '') + '</span>');
+      container.prepend('<span class="civicrm-file-icon"><img alt="' + Drupal.t('File') + '" src="' + info.icon + '" /> ' + (info.name ? ('<a href="'+ info.file_url+ '" target="_blank">'+info.name +'</a>') : '') + '</span>');
     }
   };
 
@@ -114,7 +124,7 @@ var wfCivi = (function ($, D) {
 
   var stateProvinceCache = {};
 
-  function resetFields(num, nid, clear, op, toHide, speed) {
+  function resetFields(num, nid, clear, op, toHide, hideOrDisable, showEmpty, speed, defaults) {
     $('div.form-item.webform-component[class*="--civicrm-'+num+'-contact-"]', '.webform-client-form-'+nid).each(function() {
       var $el = $(this);
       var name = getFieldNameFromClass($el);
@@ -126,9 +136,22 @@ var wfCivi = (function ($, D) {
         if (clear) {
           // Reset country to default
           if (n[5] === 'country') {
-            $('select.civicrm-processed', this).val(setting.defaultCountry).trigger('change', 'webform_civicrm:reset');
-          } else {
-            $(':input', this).not(':radio, :checkbox, :button, :submit').val('').trigger('change', 'webform_civicrm:reset');
+            $('select.civicrm-processed', this).val(D.settings.webform_civicrm.defaultCountry).trigger('change', 'webform_civicrm:reset');
+          }
+          //Set default value if it is specified in component settings.
+          else if ($el.hasClass('webform-component-date') && typeof defaults != "undefined" && defaults.hasOwnProperty(name)) {
+            var date = defaults[name].split('-');
+            $el.find('select.year, input.year').val(+date[0]);
+            $el.find('select.month').val(+date[1]);
+            $el.find('select.day').val(+date[2]);
+          }
+          else {
+            $(':input', this).not(':radio, :checkbox, :button, :submit, :file, .form-file').each(function() {
+              if (this.id && $(this).val() != '') {
+                (typeof defaults != "undefined" && defaults.hasOwnProperty(name)) ? $(this).val(defaults[name]) : $(this).val('');
+                $(this).trigger('change', 'webform_civicrm:reset');
+              }
+            });
             $('.civicrm-remove-file', this).click();
             $('input:checkbox, input:radio', this).each(function() {
               $(this).removeAttr('checked').trigger('change', 'webform_civicrm:reset');
@@ -137,10 +160,32 @@ var wfCivi = (function ($, D) {
         }
         var type = (n[6] === 'name') ? 'name' : n[4];
         if ($.inArray(type, toHide) >= 0) {
-          $el[op](speed, function() {$el[op];});
+          var fn = (op === 'hide' && (!showEmpty || !isFormItemBlank($el))) ? 'hide' : 'show';
+          $(':input', $el).webformProp('disabled', fn === 'hide');
+          $(':input', $el).webformProp('readonly', fn === 'hide');
+          $('select.civicrm-enabled[name*="_address_state_province_id"]').each(function() {
+            $(this).webformProp('disabled', fn === 'hide');
+            $(this).webformProp('readonly', fn === 'hide');
+          });
+          if (hideOrDisable === 'hide') {
+            $el[fn](speed, function() {$el[fn];});
+          }
         }
       }
     });
+  }
+
+  function isFormItemBlank($el) {
+    var isBlank = true;
+    if ($(':input:checked', $el).length) {
+      return false;
+    }
+    $(':input', $el).not(':radio, :checkbox, :button, :submit').each(function() {
+      if ($(this).val()) {
+        isBlank = false;
+      }
+    });
+    return isBlank;
   }
 
   function getFieldNameFromClass($el) {
@@ -162,7 +207,7 @@ var wfCivi = (function ($, D) {
         val = this.val;
       // Handle file fields
       if (this.data_type === 'File') {
-        pub.initFileField(fid, val);
+        pub.initFileField(fid, this);
         return;
       }
       // First try to find a single element - works for textfields and selects
@@ -170,10 +215,15 @@ var wfCivi = (function ($, D) {
       if ($el.length) {
         // For chain-select fields, store value for later if it's not available
         if ((fid.substr(fid.length - 9) === 'county_id' || fid.substr(fid.length - 11) === 'province_id') && !$('option[value='+val+']', $el).length) {
-          console.log($el);
           $el.attr('data-val', val);
         }
         else if ($el.val() !== val) {
+          if ($el.data('tokenInputObject')) {
+            $el.tokenInput('clear').tokenInput('add', {id: val, name: this.display});
+          }
+          else if ($el.is('[type=hidden]')) {
+            $el.siblings('.token-input-list').find('p').text(this.display);
+          }
           $el.val(val).trigger('change', 'webform_civicrm:autofill');
         }
       }
@@ -193,7 +243,7 @@ var wfCivi = (function ($, D) {
           // Checkboxes & radios
           else {
             $.each($.makeArray(val), function(k, v) {
-              $(':input[value="'+v+'"]', $wrapper).attr('checked', 'checked').trigger('change', 'webform_civicrm:autofill');
+              $(':input[value="'+v+'"]', $wrapper).webformProp('checked', true).trigger('change', 'webform_civicrm:autofill');
             });
           }
         }
@@ -212,12 +262,12 @@ var wfCivi = (function ($, D) {
   }
 
   function populateStates(stateSelect, countryId) {
-    $(stateSelect).attr('disabled', 'disabled');
+    $(stateSelect).webformProp('disabled', true);
     if (stateProvinceCache[countryId]) {
       fillOptions(stateSelect, stateProvinceCache[countryId]);
     }
     else {
-      $.getJSON(setting.callbackPath+'/stateProvince/'+countryId, function(data) {
+      $.getJSON(D.settings.webform_civicrm.callbackPath + '/stateProvince/' + countryId, function(data) {
         fillOptions(stateSelect, data);
         stateProvinceCache[countryId] = data;
       });
@@ -239,7 +289,7 @@ var wfCivi = (function ($, D) {
         fillOptions(countySelect, null);
       }
       else {
-        $.getJSON(setting.callbackPath+'/county/'+stateVal+'-'+countryId, function(data) {
+        $.getJSON(D.settings.webform_civicrm.callbackPath + '/county/' + stateVal + '-' + countryId, function(data) {
           fillOptions(countySelect, data);
         });
       }
@@ -253,12 +303,7 @@ var wfCivi = (function ($, D) {
     if (!$.isEmptyObject(data || [])) {
       if (!data['']) {
         var text = $el.hasClass('required') ? Drupal.t('- Select -') : Drupal.t('- None -');
-        if ($el.hasClass('has-default')) {
-          $el.removeClass('has-default');
-        }
-        else {
-          $el.append('<option value="">'+text+'</option>');
-        }
+        $el.append('<option value="">'+text+'</option>');
       }
       $.each(data, function(key, val) {
         $el.append('<option value="'+key+'">'+val+'</option>');
@@ -266,7 +311,6 @@ var wfCivi = (function ($, D) {
       $el.val(value);
     }
     else {
-      $el.removeClass('has-default');
       $el.append('<option value="-">'+Drupal.t('- N/A -')+'</option>');
     }
     $el.removeAttr('disabled').trigger('change', 'webform_civicrm:chainselect');
@@ -277,7 +321,7 @@ var wfCivi = (function ($, D) {
     var fields = $(item).parents('form.webform-client-form').find('[name*="['+(name.replace('master_id', ''))+'"]').not('[name*=location_type_id]').not('[name*=master_id]').not('[type="hidden"]');
     if (action === 'hide') {
       fields.parent().hide(speed, function() {$(this).css('display', 'none');});
-      fields.attr('disabled', 'disabled');
+      fields.webformProp('disabled', true);
     }
     else {
       fields.removeAttr('disabled');
@@ -311,9 +355,6 @@ var wfCivi = (function ($, D) {
       classes = $el.attr('class').replace('text', 'select'),
       id = $el.attr('id'),
       $form = $el.closest('form');
-    if (value !== '') {
-      classes = classes + ' has-default';
-    }
     $el.replaceWith('<select id="'+$el.attr('id')+'" name="'+$el.attr('name')+'"' + ' class="' + classes + ' civicrm-processed" data-val="' + value + '"></select>');
     return $('#' + id, $form).change(function() {
       $(this).attr('data-val', '');
@@ -322,10 +363,10 @@ var wfCivi = (function ($, D) {
 
   D.behaviors.webform_civicrmForm = {
     attach: function (context) {
-      if (!stateProvinceCache['default'] && setting) {
-        stateProvinceCache['default'] = setting.defaultStates;
-        stateProvinceCache[setting.defaultCountry] = setting.defaultStates;
-        stateProvinceCache[''] = {'': setting.noCountry};
+      if (!stateProvinceCache['default'] && D.settings.webform_civicrm) {
+        stateProvinceCache['default'] = D.settings.webform_civicrm.defaultStates;
+        stateProvinceCache[D.settings.webform_civicrm.defaultCountry] = D.settings.webform_civicrm.defaultStates;
+        stateProvinceCache[''] = {'': D.settings.webform_civicrm.noCountry};
       }
 
       // Replace state/prov & county textboxes with dynamic select lists
@@ -334,24 +375,36 @@ var wfCivi = (function ($, D) {
         var key = parseName($el.attr('name'));
         var countrySelect = $el.parents('form').find('.civicrm-enabled[name*="['+(key.replace('state_province', 'country'))+']"]');
         var $county = $el.parents('form').find('.civicrm-enabled[name*="['+(key.replace('state_province', 'county'))+']"]');
-        if (!$el.attr('readonly')) {
-          $el = makeSelect($el);
-          if ($county.length && !$county.attr('readonly')) {
-            $county = makeSelect($county);
-            $el.change(populateCounty);
-          }
 
-          var countryVal = 'default';
-          if (countrySelect.length === 1) {
-            countryVal = $(countrySelect).val();
-          }
-          else if (countrySelect.length > 1) {
-            countryVal = $(countrySelect).filter(':checked').val();
-          }
-          countryVal || (countryVal = '');
+        var readOnly = $el.attr('readonly');
 
-          populateStates($el, countryVal);
+        $el = makeSelect($el);
+        if ($county.length && !$county.attr('readonly')) {
+          $county = makeSelect($county);
+          $el.change(populateCounty);
         }
+
+        var countryVal = 'default';
+        if (countrySelect.length === 1) {
+          countryVal = $(countrySelect).val();
+        }
+        else if (countrySelect.length > 1) {
+          countryVal = $(countrySelect).filter(':checked').val();
+        }
+        countryVal || (countryVal = '');
+
+        populateStates($el, countryVal);
+
+        if (readOnly) {
+          $el.webformProp('readonly', true);
+          $el.webformProp('disabled', true);
+        }
+      });
+
+      // Support CiviCRM's quirky way of doing optgroups
+      $('option[value^=crm_optgroup]', context).each(function () {
+        $(this).nextUntil('option[value^=crm_optgroup]').wrapAll('<optgroup label="' + $(this).text() + '" />');
+        $(this).remove();
       });
 
       // Add handler to country field to trigger ajax refresh of corresponding state/prov

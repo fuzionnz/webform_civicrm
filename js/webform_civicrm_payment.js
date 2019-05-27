@@ -3,8 +3,14 @@ cj(function($) {
   'use strict';
   var
     setting = Drupal.settings.webform_civicrm,
-    $contributionAmount = $('[name*="[civicrm_1_contribution_1_contribution_total_amount]"]'),
     $processorFields = $('.civicrm-enabled[name$="civicrm_1_contribution_1_contribution_payment_processor_id]"]');
+
+  $(document).ajaxStart(function() {
+    $('#billing-payment-block').closest('form').block();
+  })
+  .ajaxStop(function() {
+    $('#billing-payment-block').closest('form').unblock();
+  });
 
   function getPaymentProcessor() {
     if (!$processorFields.length) {
@@ -16,8 +22,8 @@ cj(function($) {
   function loadBillingBlock() {
     var type = getPaymentProcessor();
     if (type && type != '0') {
-      $('#billing-payment-block').load(setting.contributionCallback + '&type=' + type, function() {
-        $('#billing-payment-block').trigger('crmFormLoad');
+      $('#billing-payment-block').load(setting.contributionCallback + '&' + setting.processor_id_key + '=' + type, function() {
+        $('#billing-payment-block').trigger('crmLoad').trigger('crmFormLoad');
         if (setting.billingSubmission) {
           $.each(setting.billingSubmission, function(key, val) {
             $('[name="' + key + '"]').val(val);
@@ -71,15 +77,20 @@ cj(function($) {
       '</tr>');
     }
     else {
-      $('td+td', $lineItem).html(CRM.formatMoney(amount));
-      $lineItem.data('amount', amount);
+      var taxPara = 1;
+      var tax = $lineItem.data('tax');
+      if (tax && tax !== '0') {
+        taxPara = 1 + (tax / 100);
+      }
+      $('td+td', $lineItem).html(CRM.formatMoney(amount * taxPara));
+      $lineItem.data('amount', amount * taxPara);
     }
     tally();
   }
 
   function getFieldAmount(fid) {
     var amount, total = 0;
-    $('input[name*="' + fid + '"], select.civicrm-enabled[name*="' + fid +'"] option')
+    $('input.civicrm-enabled[name*="' + fid + '"], select.civicrm-enabled[name*="' + fid +'"] option')
       .filter('option:selected, [type=hidden], [type=number], [type=text], :checked')
       .each(function() {
         amount = parseFloat($(this).val());
@@ -92,17 +103,21 @@ cj(function($) {
     return total < 0 ? 0 : total;
   }
 
-  function calculateContributionAmount() {
-    var amount = getFieldAmount('civicrm_1_contribution_1_contribution_total_amount');
-    var label = $contributionAmount.closest('div.webform-component').find('label').html() || Drupal.t('Contribution');
-    updateLineItem('civicrm_1_contribution_1', amount, label);
+  function calculateLineItemAmount() {
+    var fieldKey = $(this).data('civicrmFieldKey'),
+      amount = getFieldAmount(fieldKey),
+      label = $(this).closest('div.webform-component').find('label').text() || Drupal.t('Contribution'),
+      lineKey = fieldKey.split('_').slice(0, 4).join('_');
+    updateLineItem(lineKey, amount, label);
   }
 
-  if ($contributionAmount.length) {
-    calculateContributionAmount();
-    $contributionAmount.on('change keyup', calculateContributionAmount);
-  }
-  else {
-    tally();
-  }
+  $('.civicrm-enabled.contribution-line-item')
+    .each(calculateLineItemAmount)
+    .on('change keyup', calculateLineItemAmount)
+    .each(function() {
+      // Also use Drupal's jQuery to listen to this event, for compatibility with other modules
+      jQuery(this).change(calculateLineItemAmount);
+    });
+
+  tally();
 });

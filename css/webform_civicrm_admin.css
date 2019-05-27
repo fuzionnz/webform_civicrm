@@ -45,10 +45,26 @@ form .hidden,
   display:inline;
 }
 
+#wf-crm-configure-form .number-of .form-item select,
+#wf-crm-configure-form select[name=participant_reg_type] {
+  max-width: none;
+}
+
 th div.form-type-radio {
   display:inline;
   margin:0;
   padding:0;
+}
+
+#wf-crm-configure-form .dynamic-custom-checkbox > div {
+  float: none;
+  width: auto;
+  padding: .1em .5em;
+  position: absolute;
+  right: 0;
+  top: 0;
+  border-left: 1px solid #CCC;
+  border-bottom: 1px solid #CCC;
 }
 
 .web-civi-js-select {
@@ -60,6 +76,25 @@ th div.form-type-radio {
   top:-10px;
   border:1px solid #CCCCCC;
   display:none;
+}
+
+.dynamic-custom-checkbox + .web-civi-js-select {
+  right: 15em;
+}
+
+#wf-crm-configure-form .multivalue-fieldset-create-mode > div {
+  float: none;
+  width: auto;
+  padding: .5em;
+  position: absolute;
+  right: 0;
+  top: 0;
+  border-left: 1px solid #CCC;
+  border-bottom: 1px solid #CCC;
+}
+
+.multivalue-fieldset-create-mode + .web-civi-js-select {
+  right: 15em;
 }
 
 .js fieldset:hover > div > .web-civi-js-select,
@@ -154,4 +189,17 @@ form .civi-icon.grant {
 }
 form .civi-icon.case {
   background-position:-203px 0;
+}
+
+/* Contact component form */
+#webform-component-edit-form div.form-item-extra-default,
+#webform-component-edit-form div.form-item-extra-default-relationship-to,
+#webform-component-edit-form div.form-item-extra-filters-relationship-contact,
+#webform-component-edit-form div.form-item-extra-filters-relationship-type {
+  display: inline-block;
+}
+
+#webform-component-edit-form div.form-item-extra-filters-relationship-type label,
+#webform-component-edit-form div.form-item-extra-default-relationship-to label {
+  display:none;
 }
